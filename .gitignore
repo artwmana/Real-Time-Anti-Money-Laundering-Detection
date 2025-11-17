@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+
+# venv
+.venv/
+env/
+venv/
+
+# VS Code
+.vscode/
+
+# Data
+data/monitoring/
+data/processed/
+data/raw/
+
+# Secrets
+.env
+

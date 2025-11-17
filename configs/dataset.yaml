@@ -1,0 +1,92 @@
+dataset:
+  name: "AMLNet_August_2025"
+  description: "A synthetically generated dataset created for AML modeling."
+
+paths:
+  raw_data: "data/raw/AMLNet_August_2025.csv"
+  processed_dir: "data/processed"
+  train: "data/processed/train.parquet"
+  val: "data/processed/val.parquet"
+  test: "data/processed/test.parquet"
+
+schema:
+  required_columns:
+    - step
+    - type
+    - amount
+    - category
+    - nameOrig
+    - nameDest
+    - oldbalanceOrg
+    - newbalanceOrig
+    - isFraud
+    - isMoneyLaundering
+    - laundering_typology
+    - metadata
+    - fraud_probability
+    - hour
+    - day_of_week
+    - day_of_month
+    - month
+
+  # Типы данных после препроцессинга
+  dtypes:
+    step: int8
+    type: category
+    amount: float64
+    category: category
+    nameOrig: category
+    nameDest: category
+    oldbalanceOrg: float64
+    newbalanceOrig: float64
+    isFraud: bool
+    isMoneyLaundering: bool
+    laundering_typology: category
+    metadata: object
+    fraud_probability: float64
+    hour: int8
+    day_of_week: int8
+    day_of_month: int8
+    month: int8
+
+split:
+  method: "time_based"
+  train_ratio: 0.70
+  val_ratio: 0.15
+  test_ratio: 0.15
+  timestamp_column: "timestamp"
+
+target:
+  name: "is_fraud"
+  type: "binary"
+
+features:
+  numeric:
+    - amount
+    - txn_count_1d
+    - txn_count_7d
+    - txn_amount_sum_1d
+    - txn_amount_sum_7d
+    - customer_risk_score
+
+  categorical:
+    - country
+    - merchant_id
+
+  ignore:
+    - transaction_id
+    - timestamp
+    - raw_text_description   # если есть лишняя колонка
+    - customer_name
+
+encoding:
+  categorical_strategy: "frequency"     # one_hot / target / frequency
+  handle_unknown: "ignore"
+
+cleaning:
+  drop_duplicates: true
+  fill_missing:
+    amount: median
+    country: "UNK"
+    merchant_id: -1
+
