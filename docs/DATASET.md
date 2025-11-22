@@ -16,12 +16,12 @@ AMLNet is a simulator of a financial ecosystem in which agents (customers, busin
 
 ---
 
-## 📂 2. File Structure
+## 2. File Structure
 
 ```
 data/
 ├── raw/
-│   └── amlnet_transactions.csv            # raw dataset
+│   └── AMLNet_August_2025.csv            # raw dataset exported from Zenodo
 └── processed/
     ├── train.parquet
     ├── val.parquet
@@ -80,81 +80,113 @@ configs/
 | day_of_month        | int8     |
 | month               | int8     |
 
+### Metadata
+In a dataset, metadata is json that contains:
+```
+├── timestamp (datetime)
+├── location
+│   ├── city (category)
+│   ├── state (category)
+│   ├── country (category)
+│   └── postcode (int)
+├── device_info
+│   ├── type (category)
+│   ├── os (category)
+│   └── ip_address (str)
+├── payment_method (category)
+├── merchant_info
+└── risk_indicators
+    ├── amount_vs_average (float)
+    ├── customer_risk_score (float)
+    ├── category_risk (category)
+    ├── risk_score (float)
+    ├── unusual_time (bool)
+    └── unusual_location (bool)
+```
+
 ### Target
 
 | Column              | Type   | Description                               |
 | ------------------- | ------ | ----------------------------------------- |
-| isFraud | bool | 1 — suspicious/ML, 0 — normal transaction |
+| isFraud | bool | 1 — fraud, 0 — normal transaction |
+| isMoneyLaundering | bool | 1 — suspicious/ML, 0 — normal transaction |
+---
+
+## 4. What does `notebooks/01_eda.ipynb` do
+
+1. **Incremental loading.** Read the first 100k rows (`ROWS_TO_READ`), immediately convert temporary/categorical columns to compact types (`int16`, `category`, `bool`).
+2. **Unpacking metadata.** Python-like strings are converted into dictionaries, after which expanded fields are added: `loc_*`, `device_*`, `merch_*`, `risk_*`, `payment_method`, `timestamp`. Numeric fields pass `pd.to_numeric`, string fields are filled with `Unknown`.
+3. **Data quality.** `df.info(memory_usage='deep')`, top gaps, statistics on numerical columns and target imbalance.
+4. **Features.** Added time sine/cosine signs, weekend indicators, balance deltas and ratios, custom/merchant/IP aggregates, risk-based indicators and categorical `customer_risk_bucket`.
+5. **Visualizations.** Logarithmic distribution of amounts, barplot of ML shares by operation type, hourly profile (volume vs ML rate) and scatter `risk_score` vs target.
+6. **User-level split.** `GroupShuffleSplit` by `nameOrig` (80/20) after discarding potential leaks (`timestamp`, `fraud_probability`). Statistics on size and target rate are displayed.
+7. **Encoding pipeline.** `RobustScaler` for numeric ones, `OneHotEncoder` for columns with ≤8 categories, smoothed `SmoothedTargetEncoder` for high-cardinality features. The pipeline is trained only on train users.
+8. **Insights.** The final markdown captures key conclusions and next steps (cost-sensitive loss, rolling windows, `nameOrig/nameDest` embeddings).
 
 ---
 
-## 4. Feature Groups
+## 5. Feature Groups
 
 ### Numeric Features
 
-* step
-* amount
-* oldbalanceOrg
-* newbalanceOrig
-* fraud_probability
+* step, hour, day_of_week, day_of_month, month
+* amount, oldbalanceOrg, newbalanceOrig, balance_delta, amt_to_balance
+* risk_amount_vs_average, risk_customer_risk_score, risk_risk_score, risk_score_gap, amount_vs_avg_diff
+* units: user_tx_count, user_amount_median, user_amount_std, user_unique_merchants, user_device_diversity, merchant_tx_count, amt_to_merchant_avg, ip_activity_rank
 
 ### Categorical Features
 
-* category
-* nameOrig
-* nameDest
-* laundering_typology
-
-### Ignored Features
-
-* isMoneyLaundering
-* fraud_probability
+* type, category, payment_method, laundering_typology
+* device_type, device_os
+* loc_city, loc_state, loc_country, customer_risk_bucket
+* high-cardinality ID: nameOrig, nameDest, merch_merchant_id, device_ip_address
 
 ---
 
-## 5. Data Cleaning Rules
+## 6. Data Cleaning Rules
 
-| Rule                     | Behavior |
+| Rule | Behavior |
 | ------------------------ | -------- |
-| Remove duplicates        | true     |
-| Fill missing amount      | median   |
-| Fill missing country     | UNK      |
-| Fill missing merchant_id | -1       |
+| Metadata anomalies | `normalize_python_json_string` → `ast.literal_eval` |
+| Object NaNs | fill `Unknown` in loc/device/merchant/risk blocks |
+| Invalid numerics | `pd.to_numeric(errors='coerce')` + median imputation |
+| Ratio infinities | Replace with 0 after `replace([inf, -inf], nan)` and `fillna(0)` |
 
 ---
 
-## 6. Encoding
+## 7. Encoding
 
-Categorical features use **frequency encoding**.
-Unknown categories → ignore.
-
----
-
-## 7. Dataset Split Strategy
-
-Time-based split:
-
-* Train — 70%
-* Validation — 15%
-* Test — 15%
-* Sorting column: timestamp
-
-This prevents future data leakage — critical in AML/fraud tasks.
+- **Numeric** → `SimpleImputer(strategy='median')` → `RobustScaler`.
+- **Low-card categoricals** (≤8 unique) → `SimpleImputer(most_frequent)` → `OneHotEncoder(handle_unknown='ignore')`.
+- **High-card categoricals** → `SimpleImputer(most_frequent)` → `SmoothedTargetEncoder` with logistic smoothing (global average for unseen categories).
+- All steps are combined into `ColumnTransformer`; encoder is trained only on train groups from user-based split.
 
 ---
 
-## 8. Typical ML Workflow
+## 8. Dataset Split Strategy
 
-1. Schema validation (from dataset.yml)
-2. Cleaning → missing values → type enforcement
-3. Feature engineering (time-based + aggregations)
-4. Time-based split
-5. Model training (CatBoost / XGBoost / LightGBM / TabNet)
-6. Monitoring → drift detection → continuous evaluation
+User-level `GroupShuffleSplit`:
+
+* Train - 80%
+* Test - 20%
+* Group key - `nameOrig`
+
+This approach eliminates the appearance of the same client in train and test, thereby preventing leaks in target encoding and models.
 
 ---
 
-## 9. Citation
+## 9. Typical ML Workflow
+
+1. Loading + type optimization (as in 01_eda.ipynb)
+2. Unpacking metadata, filling in gaps
+3. Feature engineering (time, ratios, user/merchant/device units, risk-based)
+4. User-based train/test split, fit encoding pipeline on train
+5. Training models (CatBoost / LightGBM / tabular NN) with cost-sensitive metrics
+6. Backtesting + drift monitoring and retraining if necessary
+
+---
+
+## 10. Citation
 
 ```
 AMLNet Synthetic Dataset (2024). Zenodo. https://doi.org/10.5281/zenodo.16736515
@@ -162,6 +194,6 @@ AMLNet Synthetic Dataset (2024). Zenodo. https://doi.org/10.5281/zenodo.16736515
 
 ---
 
-## 10. License
+## 11. License
 
 The dataset is synthetic and freely available for research. See the Zenodo page for license details.
