@@ -1,6 +1,9 @@
 dataset:
   name: "AMLNet_August_2025"
-  description: "A synthetically generated dataset created for AML modeling."
+  description: >
+    Synthetic AML transactions from the AMLNet multi-agent simulator.
+    Used for research in fraud/AML detection with structured metadata
+    describing customer, location, device, merchant and risk indicators.
 
 paths:
   raw_data: "data/raw/AMLNet_August_2025.csv"
@@ -11,6 +14,7 @@ paths:
 
 schema:
   required_columns:
+    # Raw CSV columns (before metadata flattening)
     - step
     - type
     - amount
@@ -28,10 +32,29 @@ schema:
     - day_of_week
     - day_of_month
     - month
-
-  # Типы данных после препроцессинга
-  dtypes:
-    step: int8
+  derived_columns:
+    # Created inside notebooks/01_eda.ipynb
+    - payment_method
+    - timestamp
+    - loc_city
+    - loc_state
+    - loc_country
+    - loc_postcode
+    - device_type
+    - device_os
+    - device_ip_address
+    - merch_merchant_id
+    - merch_category
+    - merch_risk_level
+    - merch_avg_transaction
+    - risk_amount_vs_average
+    - risk_customer_risk_score
+    - risk_category_risk
+    - risk_risk_score
+    - risk_unusual_time
+    - risk_unusual_location
+  dtypes_post_ingest:
+    step: int16
     type: category
     amount: float64
     category: category
@@ -42,51 +65,101 @@ schema:
     isFraud: bool
     isMoneyLaundering: bool
     laundering_typology: category
-    metadata: object
     fraud_probability: float64
-    hour: int8
-    day_of_week: int8
-    day_of_month: int8
-    month: int8
+    hour: int16
+    day_of_week: int16
+    day_of_month: int16
+    month: int16
+    payment_method: category
+    timestamp: datetime64[ns]
 
 split:
-  method: "time_based"
-  train_ratio: 0.70
-  val_ratio: 0.15
-  test_ratio: 0.15
-  timestamp_column: "timestamp"
+  method: "group_shuffle"
+  train_ratio: 0.80
+  val_ratio: 0.00      # val from train with cross-validation
+  test_ratio: 0.20
+  group_key: "nameOrig"
+  random_state: 42
 
 target:
-  name: "is_fraud"
+  name: "isMoneyLaundering"
   type: "binary"
+  positive_label: 1
+  description: "1 — ML, 0 — normal"
 
 features:
   numeric:
+    - step
+    - hour
+    - day_of_week
+    - day_of_month
+    - month
     - amount
-    - txn_count_1d
-    - txn_count_7d
-    - txn_amount_sum_1d
-    - txn_amount_sum_7d
-    - customer_risk_score
-
-  categorical:
-    - country
-    - merchant_id
-
-  ignore:
-    - transaction_id
+    - oldbalanceOrg
+    - newbalanceOrig
+    - balance_delta
+    - amt_to_balance
+    - risk_amount_vs_average
+    - risk_customer_risk_score
+    - risk_risk_score
+    - risk_score_gap
+    - amount_vs_avg_diff
+    - user_tx_count
+    - user_amount_median
+    - user_amount_std
+    - amt_to_user_median
+    - user_unique_merchants
+    - user_device_diversity
+    - merchant_tx_count
+    - amt_to_merchant_avg
+    - ip_activity_rank
+    - hour_sin
+    - hour_cos
+    - dow_sin
+    - dow_cos
+  categorical_low_card:
+    - type
+    - category
+    - payment_method
+    - laundering_typology
+    - device_type
+    - device_os
+    - loc_country
+    - customer_risk_bucket
+  categorical_high_card:
+    - nameOrig
+    - nameDest
+    - merch_merchant_id
+    - device_ip_address
+    - loc_city
+    - loc_state
+  drop_before_training:
+    - fraud_probability
     - timestamp
-    - raw_text_description   # если есть лишняя колонка
-    - customer_name
 
 encoding:
-  categorical_strategy: "frequency"     # one_hot / target / frequency
-  handle_unknown: "ignore"
+  numeric:
+    imputer: "median"
+    scaler: "robust"
+  low_cardinality:
+    imputer: "most_frequent"
+    strategy: "one_hot"
+    handle_unknown: "ignore"
+  high_cardinality:
+    imputer: "most_frequent"
+    strategy: "smoothed_target"
+    smoothing: 20
+    min_samples: 50
+    target: "isMoneyLaundering"
 
 cleaning:
+  metadata_normalization: "normalize_python_json_string + ast.literal_eval"
+  fill_unknown_strings: true
+  numeric_casts:
+    - loc_postcode
+    - merch_avg_transaction
+    - risk_amount_vs_average
+    - risk_customer_risk_score
+    - risk_risk_score
+  ratio_infinity_handling: "replace inf/-inf with 0"
   drop_duplicates: true
-  fill_missing:
-    amount: median
-    country: "UNK"
-    merchant_id: -1
-
