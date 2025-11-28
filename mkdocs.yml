@@ -1,0 +1,66 @@
+site_name: Real Time Anti Money Laundering detection
+site_description: Documentation for AML system
+site_author: Art
+site_url: https://artwmana.github.io/Real-Time-Anti-Money-Laundering-Detection/
+
+repo_name: Real-Time-Anti-Money-Laundering-Detection
+repo_url: https://github.com/artwmana/Real-Time-Anti-Money-Laundering-Detection
+
+theme:
+  name: material
+  language: en
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - content.code.copy
+    - content.code.annotate
+    - search.highlight
+    - search.suggest
+    - toc.follow
+
+  palette:
+    - scheme: default
+      primary: red
+      accent: deep orange
+      toggle:
+        icon: material/weather-night
+        name: Dark mode
+    - scheme: slate
+      primary: red
+      accent: deep orange
+      toggle:
+        icon: material/weather-sunny
+        name: Light mode
+
+nav:
+  - Home: index.md
+
+  - Project:
+      - Architecture: ARCHITECTURE.md
+
+  - Data:
+      - Dataset Description: DATASET.md
+
+markdown_extensions:
+  - admonition
+  - tables
+  - attr_list
+  - footnotes
+  - def_list
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.tabbed
+  - pymdownx.tasklist
+  - pymdownx.details
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/artwmana
