@@ -21,3 +21,6 @@ data/raw/
 # CatBoost
 notebooks/catboost_info
 
+# MkDocs
+site/
+docs/.DS_Store
