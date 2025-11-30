@@ -33,3 +33,4 @@ src/aml.egg-info/top_level.txt
 # Mac
 docs/.DS_Store
 .DS_Store
+logs/feature_pipeline.log
