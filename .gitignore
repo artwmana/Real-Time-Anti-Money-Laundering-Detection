@@ -23,4 +23,14 @@ notebooks/catboost_info
 
 # MkDocs
 site/
+
+# Python package metadata
+src/aml.egg-info/dependency_links.txt
+src/aml.egg-info/PKG-INFO
+src/aml.egg-info/SOURCES.txt
+src/aml.egg-info/top_level.txt
+
+# Mac
 docs/.DS_Store
+.DS_Store
+logs/feature_pipeline.log

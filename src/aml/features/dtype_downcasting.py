@@ -5,7 +5,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-def optimize_dataframe(df: pd.DataFrame, verbose=True):
+def optimize_dataframe(df: pd.DataFrame):
     """
     Automatically optimize dataframe memory usage by:
     - downcasting integers and floats,
@@ -17,7 +17,7 @@ def optimize_dataframe(df: pd.DataFrame, verbose=True):
     for col in df.columns:
         col_type = df[col].dtype
 
-        # ---- Integers ----
+        # Integers
         if pd.api.types.is_integer_dtype(col_type):
             c_min = df[col].min()
             c_max = df[col].max()
@@ -31,15 +31,15 @@ def optimize_dataframe(df: pd.DataFrame, verbose=True):
             else:
                 df[col] = df[col].astype(np.int64)
 
-        # ---- Floats ----
+        # Floats
         elif pd.api.types.is_float_dtype(col_type):
             df[col] = pd.to_numeric(df[col], downcast="float")
 
-        # ---- Booleans ----
+        # Booleans
         elif col_type == bool:
             continue
 
-        # ---- Objects (strings) ----
+        # Objects (strings)
         elif pd.api.types.is_object_dtype(col_type):
             num_unique = df[col].nunique()
             total_count = len(df[col])
@@ -49,10 +49,6 @@ def optimize_dataframe(df: pd.DataFrame, verbose=True):
                 df[col] = df[col].astype("category")
 
     end_mem = df.memory_usage(deep=True).sum() / 1024**2
-
-    if verbose:
-        print(f"Memory reduced from {start_mem:.2f} MB to {end_mem:.2f} MB "
-              f"({100 * (start_mem - end_mem) / start_mem:.1f}% reduction)")
 
     return df
 
