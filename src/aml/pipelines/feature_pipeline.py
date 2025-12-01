@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 
 from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import OneHotEncoder, RobustScaler
+from sklearn.preprocessing import OneHotEncoder, RobustScaler, OrdinalEncoder
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
 
@@ -99,6 +99,7 @@ class FeaturePipeline:
         self.encoded_feature_names_: Optional[list[str]] = None
         self.numeric_cols_: list[str] = []
         self.low_card_cols_: list[str] = []
+        self.ordinal_cols_: list[str] = []
         self.high_card_cols_: list[str] = []
 
         logger.info(
@@ -225,6 +226,8 @@ class FeaturePipeline:
 
         categorical_cols = X.select_dtypes(include=["object", "category"]).columns.tolist()
         self.low_card_cols_ = [c for c in categorical_cols if X[c].nunique() <= self.encoder_cfg.low_card_threshold]
+        self.ordinal_cols_ = [i for i in self.low_card_cols_ if 'risk' in i]
+        self.low_card_cols_ = [c for c in self.low_card_cols_ if c not in self.ordinal_cols_]
         self.high_card_cols_ = [c for c in categorical_cols if c not in self.low_card_cols_]
         self.numeric_cols_ = X.columns.difference(categorical_cols).tolist()
 
@@ -236,6 +239,11 @@ class FeaturePipeline:
         low_card_pipe = Pipeline([
             ("imputer", SimpleImputer(strategy="most_frequent")),
             ("encoder", OneHotEncoder(handle_unknown="ignore", sparse_output=False)),
+        ])
+
+        original_pipe = Pipeline([
+            ("imputer", SimpleImputer(strategy="most_frequent")),
+            ("encoder", OrdinalEncoder(min_frequency=50, handle_unknown="use_encoded_value", unknown_value=-1)),
         ])
 
         time_col = "timestamp_ts" if "timestamp_ts" in X.columns else None
@@ -256,6 +264,7 @@ class FeaturePipeline:
             transformers=[
                 ("num", num_pipe, self.numeric_cols_),
                 ("low_card", low_card_pipe, self.low_card_cols_),
+                ("orig", original_pipe, self.ordinal_cols_),
                 ("high_card", high_card_pipe, high_card_features),
             ],
             remainder="drop",
@@ -311,6 +320,10 @@ class FeaturePipeline:
                 except Exception:
                     for col, cats in zip(self.low_card_cols_, ohe.categories_):
                         names += [f"low_card__{col}_{c}" for c in cats]
+
+        # original
+        if len(self.ordinal_cols_) > 0:
+            names += [f"orig__{c}" for c in self.ordinal_cols_]
 
         # high-card (target encoding = 1 колонка на фичу)
         high_card_tf = self.preprocessor.named_transformers_.get("high_card")
