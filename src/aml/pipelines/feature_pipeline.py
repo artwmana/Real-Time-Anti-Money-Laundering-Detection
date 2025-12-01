@@ -16,17 +16,15 @@ from sklearn.impute import SimpleImputer
 
 from aml.features.json_extractor import flatten_metadata
 from aml.features.dtype_downcasting import optimize_dataframe
-from aml.features.encoding import SmoothedTargetEncoder
+from aml.features.kfold_target_encoder import TimeKFoldTargetEncoder
 
 logger = logging.getLogger(__name__)
-
 
 # Decorator for stage logs
 def _shape_of(x: Any):
     if isinstance(x, (pd.DataFrame, pd.Series, np.ndarray)):
         return x.shape
     return None
-
 
 def log_stage(_fn: Optional[Callable] = None, *, name: Optional[str] = None, level: int = logging.INFO):
     def decorator(fn: Callable):
@@ -60,7 +58,6 @@ def log_stage(_fn: Optional[Callable] = None, *, name: Optional[str] = None, lev
 
     return decorator if _fn is None else decorator(_fn)
 
-
 # Config
 @dataclass(frozen=True)
 class EncoderConfig:
@@ -70,6 +67,17 @@ class EncoderConfig:
 
 # Feature Pipeline
 class FeaturePipeline:
+    """
+    Feature Pipeline for both offline and real-time features
+
+    Stages:
+    - Check input
+    - Flatten JSON
+    - Optimize dtypes
+    - Adding new features (feature engineering)
+    - Encoding
+    """
+
     def __init__(
         self,
         enable_downcasting: bool = True,
@@ -142,7 +150,6 @@ class FeaturePipeline:
 
     def transform_single(self, record: Dict[str, Any]):
         return self.transform(pd.DataFrame([record]))
-
 
     # Core stages
     def _validate_input(self, df: pd.DataFrame) -> None:
@@ -231,16 +238,25 @@ class FeaturePipeline:
             ("encoder", OneHotEncoder(handle_unknown="ignore", sparse_output=False)),
         ])
 
-        high_card_pipe = Pipeline([
-            ("imputer", SimpleImputer(strategy="most_frequent")),
-            ("target", SmoothedTargetEncoder()),
-        ])
+        time_col = "timestamp_ts" if "timestamp_ts" in X.columns else None
+        if len(self.high_card_cols_) > 0:
+            high_card_features = self.high_card_cols_ + ([time_col] if time_col else [])
+            high_card_pipe = Pipeline([
+                ("target", TimeKFoldTargetEncoder(
+                    cols=self.high_card_cols_,
+                    time_col=time_col,
+                    n_splits=5,
+                )),
+            ])
+        else:
+            high_card_features = []
+            high_card_pipe = "drop"
 
         self.preprocessor = ColumnTransformer(
             transformers=[
                 ("num", num_pipe, self.numeric_cols_),
                 ("low_card", low_card_pipe, self.low_card_cols_),
-                ("high_card", high_card_pipe, self.high_card_cols_),
+                ("high_card", high_card_pipe, high_card_features),
             ],
             remainder="drop",
         )
@@ -273,32 +289,37 @@ class FeaturePipeline:
         if self.preprocessor is None:
             raise RuntimeError("Preprocessor is not fitted")
 
-        # ✅ Современный путь
         if hasattr(self.preprocessor, "get_feature_names_out"):
             try:
                 return list(map(str, self.preprocessor.get_feature_names_out()))
             except Exception:
                 logger.warning("get_feature_names_out() exists but failed, fallback to manual build")
 
-        # ✅ РУЧНОЙ, НО КОРРЕКТНЫЙ fallback
         names: list[str] = []
 
-        # --- numeric ---
+        # numeric 
         names += [f"num__{c}" for c in self.numeric_cols_]
 
-        # --- low-card OneHot ---
+        # low-card OneHot
         if len(self.low_card_cols_) > 0:
-            ohe = self.preprocessor.named_transformers_["low_card"].named_steps["encoder"]
-            try:
-                ohe_names = ohe.get_feature_names_out(self.low_card_cols_)
-                names += [f"low_card__{n}" for n in ohe_names]
-            except Exception:
-                # самый жёсткий fallback: по категориям
-                for col, cats in zip(self.low_card_cols_, ohe.categories_):
-                    names += [f"low_card__{col}_{c}" for c in cats]
+            low_card_tf = self.preprocessor.named_transformers_.get("low_card")
+            if low_card_tf != "drop" and low_card_tf is not None:
+                ohe = low_card_tf.named_steps["encoder"]
+                try:
+                    ohe_names = ohe.get_feature_names_out(self.low_card_cols_)
+                    names += [f"low_card__{n}" for n in ohe_names]
+                except Exception:
+                    for col, cats in zip(self.low_card_cols_, ohe.categories_):
+                        names += [f"low_card__{col}_{c}" for c in cats]
 
-        # --- high-card (target encoding = 1 колонка на фичу) ---
-        names += [f"high_card__{c}" for c in self.high_card_cols_]
+        # high-card (target encoding = 1 колонка на фичу)
+        high_card_tf = self.preprocessor.named_transformers_.get("high_card")
+        if len(self.high_card_cols_) > 0 and high_card_tf != "drop" and high_card_tf is not None:
+            has_count = getattr(high_card_tf.named_steps["target"], "add_count_features", False)
+            suffixes = ["enc", "cnt"] if has_count else ["enc"]
+            for col in self.high_card_cols_:
+                for suf in suffixes:
+                    names.append(f"high_card__{col}__{suf}")
 
         return names
 
@@ -308,12 +329,15 @@ class FeaturePipeline:
     def _adding_col(self, feats):
         if self.enable_encoding and isinstance(feats, np.ndarray):
             cols = self.encoded_feature_names_
-            df_out = pd.DataFrame(feats, columns=cols)
-            return df_out
+            return pd.DataFrame(feats, columns=cols)
 
         if isinstance(feats, pd.DataFrame):
             return feats
         
+        cols = getattr(self, "encoded_feature_names_", None)
+        if cols is None:
+            raise ValueError("Encoded feature names are not available.")
+
         if feats.shape[1] != len(cols):
             raise ValueError(
                 f"Mismatch between encoded data and feature names: "
