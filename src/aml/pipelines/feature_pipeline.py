@@ -91,8 +91,8 @@ class FeaturePipeline:
             "laundering_typology",
             "isFraud",
             "isMoneyLaundering",
-            "nameDest",
-            "nameOrig",
+            #"nameDest",
+            #"nameOrig",
         ),
     ):
         self.enable_downcasting = enable_downcasting
