@@ -39,6 +39,7 @@ nav:
 
   - Project:
       - Architecture: ARCHITECTURE.md
+      - ML System Design: ML_SYSTEM_DESIGN.md
 
   - Data:
       - Dataset Description: DATASET.md
