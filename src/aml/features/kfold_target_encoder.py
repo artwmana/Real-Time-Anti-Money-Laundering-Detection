@@ -20,7 +20,6 @@ class TimeKFoldTargetEncoder(BaseEstimator, TransformerMixin):
         n_splits: int = 5,
         alpfa: float = 200.0,
         min_count: int = 20,
-        add_count_features: bool = True,
         use_logit: bool = False,
         eps: float = 1e-6,
         random_state: int = 42,
@@ -30,7 +29,6 @@ class TimeKFoldTargetEncoder(BaseEstimator, TransformerMixin):
         self.n_splits = n_splits
         self.alpfa = alpfa
         self.min_count = min_count
-        self.add_count_features = add_count_features
         self.use_logit = use_logit
         self.eps = eps
         self.random_state = random_state
@@ -44,15 +42,13 @@ class TimeKFoldTargetEncoder(BaseEstimator, TransformerMixin):
 
         self._global_mean = float(y.mean())
         self.stats_: dict[str, pd.Series] = {}
-        self.counts_: dict[str, pd.Series] = {}
         self.rare_categories_: dict[str, set[str]] = {}
 
         for col in self.cols:
             x = X[col].copy()
             x, rare = self._mark_rare(x)
-            enc, counts = self._stat(x, y)
+            enc = self._stat(x, y)
             self.stats_[col] = enc
-            self.counts_[col] = counts
             self.rare_categories_[col] = rare
 
         return self
@@ -72,7 +68,6 @@ class TimeKFoldTargetEncoder(BaseEstimator, TransformerMixin):
         for col in self.cols:
             x = X[col].copy()
             oof = np.zeros(n, dtype=float)
-            counts_oof = np.zeros(n, dtype=float)
 
             for fold in folds:
                 val_idx = fold
@@ -82,15 +77,12 @@ class TimeKFoldTargetEncoder(BaseEstimator, TransformerMixin):
                 x_val = x.iloc[val_idx].copy()
 
                 x_train, rare = self._mark_rare(x_train)
-                enc, counts = self._stat(x_train, y_train)
+                enc = self._stat(x_train, y_train)
 
                 x_val = self._apply_rare(x_val, rare, enc.index)
                 oof[val_idx] = self._map_encodings(x_val, enc)
-                counts_oof[val_idx] = x_val.map(counts).fillna(0).to_numpy()
 
             encoded_parts.append(oof)
-            if self.add_count_features:
-                encoded_parts.append(counts_oof)
 
         self.fit(X, y)
 
@@ -107,12 +99,9 @@ class TimeKFoldTargetEncoder(BaseEstimator, TransformerMixin):
             x = X[col].copy()
             rare = self.rare_categories_.get(col, set())
             enc = self.stats_[col]
-            counts = self.counts_[col]
 
             x = self._apply_rare(x, rare, enc.index)
             encoded_parts.append(self._map_encodings(x, enc))
-            if self.add_count_features:
-                encoded_parts.append(x.map(counts).fillna(0).to_numpy())
 
         return np.vstack(encoded_parts).T
 
@@ -132,7 +121,7 @@ class TimeKFoldTargetEncoder(BaseEstimator, TransformerMixin):
 
         return [f for f in folds if len(f) > 0]
 
-    def _stat(self, x: pd.Series, y: pd.Series) -> tuple[pd.Series, pd.Series]:
+    def _stat(self, x: pd.Series, y: pd.Series) -> pd.Series:
         x = x.astype(str)
         y = pd.Series(y)
 
@@ -140,7 +129,7 @@ class TimeKFoldTargetEncoder(BaseEstimator, TransformerMixin):
         enc = (grp["sum"] + self.alpfa * self._global_mean) / (grp["count"] + self.alpfa)
         if self.use_logit:
             enc = self._to_logit(enc)
-        return enc, grp["count"]
+        return enc
 
     def _mark_rare(self, x: pd.Series) -> tuple[pd.Series, set[str]]:
         freq = x.value_counts()

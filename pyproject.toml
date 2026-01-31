@@ -18,7 +18,9 @@ dependencies = [
     "kafka-python",
     "confluent-kafka",
     "category-encoders",
-    "python-dotenv"
+    "python-dotenv",
+    "pyyaml",
+    "pyspark==3.5.2"
 ]
 
 [tool.setuptools]

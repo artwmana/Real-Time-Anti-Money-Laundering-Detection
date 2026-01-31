@@ -86,6 +86,14 @@ class FeaturePipeline:
         enable_columns: bool = False,
         drop_original_metadata: bool = True,
         encoder_cfg: EncoderConfig = EncoderConfig(),
+        leakage_cols: Tuple[str, ...] = (
+            "fraud_probability",
+            "laundering_typology",
+            "isFraud",
+            "isMoneyLaundering",
+            #"nameDest",
+            #"nameOrig",
+        ),
     ):
         self.enable_downcasting = enable_downcasting
         self.enable_encoding = enable_encoding
@@ -93,6 +101,7 @@ class FeaturePipeline:
         self.enable_columns = enable_columns
         self.drop_original_metadata = drop_original_metadata
         self.encoder_cfg = encoder_cfg
+        self.leakage_cols = tuple(dict.fromkeys(leakage_cols))
 
         self.preprocessor: Optional[ColumnTransformer] = None
         self.feature_columns_: Optional[list[str]] = None
@@ -166,6 +175,8 @@ class FeaturePipeline:
     def _build_features(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
 
+        df = self._drop_leakage(df)
+
         if "metadata" in df.columns:
             df = flatten_metadata(df)
             if self.drop_original_metadata:
@@ -219,6 +230,13 @@ class FeaturePipeline:
 
     def _drop_targets(self, df: pd.DataFrame) -> pd.DataFrame:
         return df.drop(columns=list(self.encoder_cfg.target_cols), errors="ignore")
+
+    def _drop_leakage(self, df: pd.DataFrame) -> pd.DataFrame:
+        leaked = [c for c in self.leakage_cols if c in df.columns]
+        if leaked:
+            logger.warning("Dropping potential leakage columns: %s", leaked)
+            df = df.drop(columns=leaked, errors="ignore")
+        return df
 
     @log_stage(name="fit_encoder")
     def _fit_encoder(self, df: pd.DataFrame, y_train: pd.Series) -> np.ndarray:
@@ -328,11 +346,8 @@ class FeaturePipeline:
         # high-card (target encoding = 1 колонка на фичу)
         high_card_tf = self.preprocessor.named_transformers_.get("high_card")
         if len(self.high_card_cols_) > 0 and high_card_tf != "drop" and high_card_tf is not None:
-            has_count = getattr(high_card_tf.named_steps["target"], "add_count_features", False)
-            suffixes = ["enc", "cnt"] if has_count else ["enc"]
             for col in self.high_card_cols_:
-                for suf in suffixes:
-                    names.append(f"high_card__{col}__{suf}")
+                names.append(f"high_card__{col}__enc")
 
         return names
 
@@ -356,6 +371,5 @@ class FeaturePipeline:
                 f"Mismatch between encoded data and feature names: "
                 f"X has {feats.shape[1]} columns but got {len(cols)} names"
             )
-
 
         return pd.DataFrame(feats)

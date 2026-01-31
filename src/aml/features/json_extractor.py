@@ -75,9 +75,9 @@ def fill_object_nan(df: pd.DataFrame, fill_value: str = "Unknown") -> pd.DataFra
     """
     Replace NaNs in object columns for consistent downstream encoding.
     """
-    for col in df.columns:
-        if df[col].dtype == object:
-            df[col] = df[col].fillna(fill_value)
+    obj_cols = df.select_dtypes(include=["object"]).columns
+    if not obj_cols.empty:
+        df[obj_cols] = df[obj_cols].fillna(fill_value)
     return df
 
 
@@ -98,45 +98,50 @@ def flatten_metadata(df: pd.DataFrame) -> pd.DataFrame:
     if "metadata" not in df.columns:
         raise KeyError("Expected column 'metadata' to flatten payloads.")
 
-    meta = df.pop("metadata").apply(parse_metadata_payload)
-    meta_df = meta.apply(pd.Series)
+    # Parse payloads row-wise (required because of Python literals), then
+    # leverage json_normalize to expand nested structures in a single pass.
+    meta_parsed = df["metadata"].map(parse_metadata_payload)
+    meta_df = pd.json_normalize(meta_parsed)
 
-    location = fill_object_nan(expand_nested_dict(meta_df.get("location"), "loc"))
-    device = fill_object_nan(expand_nested_dict(meta_df.get("device_info"), "device"))
-    merchant = fill_object_nan(
-        expand_nested_dict(meta_df.get("merchant_info"), "merch")
-    )
-    risk = fill_object_nan(expand_nested_dict(meta_df.get("risk_indicators"), "risk"))
+    def _prefixed_slice(prefix: str, new_prefix: str) -> pd.DataFrame:
+        cols = [c for c in meta_df.columns if c.startswith(f"{prefix}.")]
+        if not cols:
+            return pd.DataFrame(index=df.index)
+        subset = meta_df[cols].copy()
+        subset.columns = [f"{new_prefix}_{c.split('.', 1)[1]}" for c in cols]
+        return subset
 
-    coerce_numeric_columns(
-        location,
-        ["loc_postcode"],
-    )
-    coerce_numeric_columns(
-        merchant,
-        ["merch_avg_transaction"],
-    )
+    location = fill_object_nan(_prefixed_slice("location", "loc"))
+    device = fill_object_nan(_prefixed_slice("device_info", "device"))
+    merchant = fill_object_nan(_prefixed_slice("merchant_info", "merch"))
+    risk = fill_object_nan(_prefixed_slice("risk_indicators", "risk"))
+
+    coerce_numeric_columns(location, ["loc_postcode"])
+    coerce_numeric_columns(merchant, ["merch_avg_transaction"])
     coerce_numeric_columns(
         risk,
-        ["risk_amount_vs_average", "risk_customer_risk_score", "risk_risk_score"],
+        [
+            "risk_amount_vs_average",
+            "risk_customer_risk_score",
+            "risk_risk_score",
+        ],
     )
 
     meta_subset = meta_df[["timestamp", "payment_method"]].copy()
     meta_subset["timestamp"] = pd.to_datetime(meta_subset["timestamp"], errors="coerce")
     meta_subset["payment_method"] = meta_subset["payment_method"].fillna("Unknown")
 
-    flattened = pd.concat(
-        [
-            df,
-            location,
-            device,
-            merchant,
-            risk,
-            meta_subset,
-        ],
-        axis=1,
-    )
-    return flattened
+    base = df.drop(columns=["metadata"]).reset_index(drop=True)
+    parts = [
+        base,
+        location.reset_index(drop=True),
+        device.reset_index(drop=True),
+        merchant.reset_index(drop=True),
+        risk.reset_index(drop=True),
+        meta_subset.reset_index(drop=True),
+    ]
+
+    return pd.concat(parts, axis=1)
 
 
 def transform_transactions(
