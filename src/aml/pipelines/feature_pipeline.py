@@ -16,7 +16,7 @@ from sklearn.impute import SimpleImputer
 
 from aml.features.json_extractor import flatten_metadata
 from aml.features.dtype_downcasting import optimize_dataframe
-from aml.features.kfold_target_encoder import TimeKFoldTargetEncoder
+from aml.features.nested_time_loo_encoder import Nested_Time_loo_encoder
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +94,10 @@ class FeaturePipeline:
             #"nameDest",
             #"nameOrig",
         ),
+        alpha = 50,
+        min_count = 20,
+        use_logit = False,
+        eps = 1e-6, 
     ):
         self.enable_downcasting = enable_downcasting
         self.enable_encoding = enable_encoding
@@ -110,6 +114,10 @@ class FeaturePipeline:
         self.low_card_cols_: list[str] = []
         self.ordinal_cols_: list[str] = []
         self.high_card_cols_: list[str] = []
+        self.alpha = alpha
+        self.min_count = min_count
+        self.use_logit = use_logit
+        self.eps = eps
 
         logger.info(
             "FeaturePipeline initialized | downcasting=%s | encoding=%s | _scale=%s | columns=%s",
@@ -268,10 +276,14 @@ class FeaturePipeline:
         if len(self.high_card_cols_) > 0:
             high_card_features = self.high_card_cols_ + ([time_col] if time_col else [])
             high_card_pipe = Pipeline([
-                ("target", TimeKFoldTargetEncoder(
+                ("target", Nested_Time_loo_encoder(
                     cols=self.high_card_cols_,
                     time_col=time_col,
                     n_splits=5,
+                    alpha=self.alpha,
+                    min_count=self.min_count,
+                    use_logit=self.use_logit,
+                    eps=self.eps,
                 )),
             ])
         else:
