@@ -15,7 +15,7 @@ class TimeSplit:
 
 def chronological_split(
     df: pd.DataFrame,
-    timestamp_col: str = "num__timestamp_ts",
+    timestamp_col: str = "timestamp",
     test_days: int = 20,
     val_days: int = 20,
     gap_days: int = 0,
