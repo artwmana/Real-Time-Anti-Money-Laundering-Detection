@@ -34,3 +34,14 @@ src/aml.egg-info/top_level.txt
 docs/.DS_Store
 .DS_Store
 logs/feature_pipeline.log
+notebooks/artifacts/best_params.json
+notebooks/artifacts/features.json
+notebooks/artifacts/meta_model.pkl
+notebooks/artifacts/model_cat.cbm
+notebooks/artifacts/model_lgb.pkl
+notebooks/artifacts/model_xgb.json
+notebooks/artifacts/study_cat.pkl
+notebooks/artifacts/study_ligh.pkl
+notebooks/artifacts/study_xg.pkl
+notebooks/artifacts/threshold.json
+notebooks/artifacts/training_config.json
