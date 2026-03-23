@@ -14,8 +14,8 @@ from sklearn.preprocessing import OneHotEncoder, RobustScaler, OrdinalEncoder
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
 
-from aml.features.json_extractor import flatten_metadata
-from aml.features.dtype_downcasting import optimize_dataframe
+from aml.preprocessing.json_extractor import flatten_metadata
+from aml.preprocessing.dtype_downcasting import optimize_dataframe
 from aml.features.nested_time_loo_encoder import Nested_Time_loo_encoder
 
 logger = logging.getLogger(__name__)
