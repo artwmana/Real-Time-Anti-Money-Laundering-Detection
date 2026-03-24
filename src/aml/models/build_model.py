@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, Optional, Tuple
 
 import lightgbm as lgb
@@ -23,6 +24,7 @@ from sklearn.preprocessing import StandardScaler
 from xgboost import XGBClassifier
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
+logger = logging.getLogger(__name__)
 
 class AMLEnsemble:
     def __init__(
@@ -71,12 +73,13 @@ class AMLEnsemble:
                 return model
 
             if name == "lgbm":
+                early_stopping_rounds = model.get_params().get("early_stopping_rounds", self.early_stopping_rounds)
                 model.fit(
                     X_tr,
                     y_tr,
                     eval_set=[(X_va, y_va)],
                     callbacks=[
-                        lgb.early_stopping(self.early_stopping_rounds, verbose=False),
+                        lgb.early_stopping(early_stopping_rounds, verbose=False),
                         lgb.log_evaluation(-1),
                     ],
                 )
@@ -90,9 +93,10 @@ class AMLEnsemble:
 
     def tune_models(self, X_train: pd.DataFrame, y_train: pd.DataFrame, X_val: pd.DataFrame, y_val: pd.DataFrame):
         self._calculate_scale_pos_weight(y_train)
+        logger.info("Calculated scale_pos_weight=%.6f", self.scale_pos_weight)
         
         for name in self.model_names:
-            print(f"Tuning {name}")
+            logger.info("Starting Optuna tuning for %s", name)
             study = optuna.create_study(
                 direction="maximize",
                 sampler=TPESampler(seed=self.random_state),
@@ -105,7 +109,7 @@ class AMLEnsemble:
             
             self.studies[name] = study
             self.best_params[name] = study.best_params
-            print(f"{name} best PR-AUC on val: {study.best_value:.6f}")
+            logger.info("%s best PR-AUC on val: %.6f", name, study.best_value)
 
         return self.best_params
 
@@ -127,6 +131,12 @@ class AMLEnsemble:
 
         self.scale_pos_weight = N_neg / N_pos
         return self.scale_pos_weight
+
+    @staticmethod
+    def _validate_binary_target(y: np.ndarray, name: str) -> None:
+        classes = np.unique(y)
+        if classes.size < 2:
+            raise ValueError(f"{name} must contain both classes, got {classes.tolist()}")
     
     def build_model(self, name: str, params: Dict[str, Any], early_stopping_rounds: Optional[int] = None) -> Any:
         if early_stopping_rounds is None:
@@ -303,9 +313,17 @@ class AMLEnsemble:
         oof = np.full((len(X), len(self.model_names)), np.nan, dtype=np.float64)
 
         for fold, (tr_idx, va_idx) in enumerate(tscv.split(X), 1):
-            print(f"OOF fold {fold}/{self.meta_splits} | train={len(tr_idx):,} val={len(va_idx):,}")
+            logger.info(
+                "OOF fold %d/%d | train=%d | val=%d",
+                fold,
+                self.meta_splits,
+                len(tr_idx),
+                len(va_idx),
+            )
             X_tr, y_tr = X.iloc[tr_idx], y[tr_idx]
             X_va, y_va = X.iloc[va_idx], y[va_idx]
+            self._validate_binary_target(y_tr, f"OOF train fold {fold}")
+            self._validate_binary_target(y_va, f"OOF val fold {fold}")
 
             for col_idx, name in enumerate(self.model_names):
                 fold_model = self.build_model(
@@ -332,6 +350,8 @@ class AMLEnsemble:
         y_train = self._ensure_array(y_train)
         X_val = self._ensure_dataframe(X_val)
         y_val = self._ensure_array(y_val)
+        self._validate_binary_target(y_train, "y_train")
+        self._validate_binary_target(y_val, "y_val")
 
         self.X_train_ = X_train
         self.y_train_ = y_train
@@ -339,18 +359,28 @@ class AMLEnsemble:
         self.y_val_ = y_val
         self.X_trainval_ = pd.concat([X_train, X_val], axis=0).reset_index(drop=True)
         self.y_trainval_ = np.concatenate([y_train, y_val])
+        logger.info(
+            "Starting ensemble fit | X_train=%s | X_val=%s | train_pos=%d | val_pos=%d",
+            X_train.shape,
+            X_val.shape,
+            int(y_train.sum()),
+            int(y_val.sum()),
+        )
 
         self.tune_models(X_train, y_train, X_val, y_val)
 
         self.base_models_train = {}
         self.best_iterations = {}
         for name in self.model_names:
+            logger.info("Fitting tuned base model on train split: %s", name)
             model = self.build_model(name=name, params=self.best_params[name], early_stopping_rounds=self.early_stopping_rounds)
             model = self.fit_model(name, model, X_train, y_train, X_val, y_val)
             self.base_models_train[name] = model
             self.best_iterations[name] = self._extract_best_iteration(name, model)
+            logger.info("%s best iteration: %d", name, self.best_iterations[name])
 
         oof_meta_df, y_oof = self._make_oof_meta_features(X_train, y_train)
+        logger.info("Built OOF meta-features with shape=%s", oof_meta_df.shape)
 
         self.meta_model = SkPipeline([
             ("scaler", StandardScaler()),
@@ -366,6 +396,7 @@ class AMLEnsemble:
             ),
         ])
         self.meta_model.fit(oof_meta_df, y_oof)
+        logger.info("Fitted logistic regression meta-model")
 
         val_meta_df = pd.DataFrame(
             {
@@ -375,9 +406,11 @@ class AMLEnsemble:
         )
         val_stack_proba = self.meta_model.predict_proba(val_meta_df)[:, 1]
         self.best_stack_threshold = self.best_f1_threshold(y_val, val_stack_proba)
+        logger.info("Selected best stack threshold=%.6f", self.best_stack_threshold)
 
         self.base_models_trainval = {}
         for name in self.model_names:
+            logger.info("Refitting base model on train+val: %s", name)
             refit_model = self._build_refit_model(
                 name=name,
                 params=self.best_params[name],
@@ -385,6 +418,7 @@ class AMLEnsemble:
             )
             refit_model.fit(self.X_trainval_, self.y_trainval_)
             self.base_models_trainval[name] = refit_model
+        logger.info("Finished ensemble fit and refit on train+val")
 
         return self
 

@@ -64,3 +64,10 @@ def describe_split(split: TimeSplit, target: str) -> Dict[str, float]:
         "test_pos": _stats(split.test)[1],
         "test_pos_rate": _stats(split.test)[2],
     }
+
+
+def validate_split_targets(split: TimeSplit, target: str) -> None:
+    for name, part in (("train", split.train), ("val", split.val), ("test", split.test)):
+        classes = part[target].dropna().unique()
+        if len(classes) < 2:
+            raise ValueError(f"{name} split must contain both classes in '{target}', got {classes.tolist()}")
