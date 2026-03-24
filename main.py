@@ -3,7 +3,7 @@ import logging
 from pathlib import Path
 import pandas as pd
 
-from aml.preprocessing.feature_pipeline import FeaturePipeline
+from aml.pipelines.feature_pipeline import FeaturePipeline
 
 
 LOG_DIR = Path("logs")
