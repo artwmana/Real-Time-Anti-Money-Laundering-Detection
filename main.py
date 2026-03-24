@@ -3,15 +3,14 @@ import logging
 from pathlib import Path
 import pandas as pd
 
-from aml.features.feature_pipeline import FeaturePipeline
+from aml.pipelines.feature_pipeline import FeaturePipeline
 
 
-# 1. Setup logging
 LOG_DIR = Path("logs")
 LOG_DIR.mkdir(exist_ok=True)
 
 logging.basicConfig(
-    level=logging.INFO,   # DEBUG если нужно больше подробностей
+    level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     handlers=[
         logging.FileHandler(LOG_DIR / "feature_pipeline.log", encoding="utf-8"),
@@ -21,8 +20,6 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-
-# 2. Main entry
 def main():
     logger.info("Application started")
 
