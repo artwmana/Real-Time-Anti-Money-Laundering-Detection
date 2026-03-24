@@ -7,6 +7,7 @@ The logic mirrors the parsing pipeline used in notebooks/01_eda.ipynb.
 from __future__ import annotations
 
 import ast
+import datetime
 import os
 import re
 from pathlib import Path
@@ -38,11 +39,12 @@ def normalize_python_json_string(value: str) -> str:
     Replace python datetime constructors with ISO strings so that ast.literal_eval
     works without executing arbitrary code.
     """
+    if "datetime.datetime(" not in value:
+        return value
 
     def repl(match: re.Match[str]) -> str:
-        args = match.group(1).split(",")
-        nums = [int(a.strip()) for a in args]
-        return f"'{pd.Timestamp(*nums).isoformat()}'"
+        # standard python datetime is significantly faster to construct than pd.Timestamp
+        return f"'{datetime.datetime(*(int(a) for a in match.group(1).split(','))).isoformat()}'"
 
     return DATETIME_PATTERN.sub(repl, value)
 
