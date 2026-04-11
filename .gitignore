@@ -32,3 +32,4 @@ docs/.DS_Store
 .DS_Store
 logs/*
 artifacts/*
+models/*
