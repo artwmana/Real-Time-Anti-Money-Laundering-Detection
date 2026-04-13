@@ -159,6 +159,7 @@ class FeaturePipeline:
             raise RuntimeError("Encoder is not fitted.")
 
         X = self._drop_targets(feats)
+        X = self._align_to_fitted_columns(X)
         Xt = self.preprocessor.transform(X)
 
         if self.enable_columns:
@@ -168,6 +169,28 @@ class FeaturePipeline:
 
     def transform_single(self, record: Dict[str, Any]):
         return self.transform(pd.DataFrame([record]))
+
+    @log_stage(name="build_feature_frame")
+    def build_feature_frame(self, df: pd.DataFrame) -> pd.DataFrame:
+        self._validate_input(df)
+        return self._build_features(df)
+
+    def build_feature_snapshot(self, record: Dict[str, Any]) -> Dict[str, Any]:
+        frame = self.build_feature_frame(pd.DataFrame([record]))
+        return frame.iloc[0].to_dict()
+
+    def _align_to_fitted_columns(self, X: pd.DataFrame) -> pd.DataFrame:
+        expected_cols = list(
+            dict.fromkeys(
+                self.numeric_cols_ + self.low_card_cols_ + self.ordinal_cols_ + self.high_card_cols_
+            )
+        )
+
+        for col in expected_cols:
+            if col not in X.columns:
+                X[col] = np.nan
+
+        return X[expected_cols]
 
     # Core stages
     def _validate_input(self, df: pd.DataFrame) -> None:
