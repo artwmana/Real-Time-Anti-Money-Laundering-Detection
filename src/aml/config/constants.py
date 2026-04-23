@@ -1,0 +1,10 @@
+TARGET_COL = "isMoneyLaundering"
+LEGACY_TARGET_COL = "isFraud"
+TIMESTAMP_COL = "timestamp_ts"
+
+DEFAULT_REVIEW_THRESHOLD = 0.65
+DEFAULT_BLOCK_THRESHOLD = 0.90
+
+SCHEMA_VERSION = "2026-04-11"
+POLICY_VERSION = "aml_policy_v1"
+MODEL_VERSION = "aml_ensemble_v1"

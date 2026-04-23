@@ -23,7 +23,10 @@ dependencies = [
     "joblib",
     "python-dotenv",
     "pyyaml",
-    "pyspark==3.5.2"
+    "pyspark==3.5.2",
+    "psycopg[binary]>=3.2",
+    "redis>=5.0",
+    "clickhouse-connect>=0.7"
 ]
 
 [tool.setuptools]
@@ -34,6 +37,14 @@ where = ["src"]
 
 [project.scripts]
 aml-train-optuna = "aml.training.optuna_tuning:main"
+aml-train = "aml.training.optuna_tuning:main"
+aml-serve = "aml.api.app:main"
+aml-generate = "aml.generation.synthetic:main"
+aml-replay = "aml.runtime.replay:main"
+aml-monitor-report = "aml.runtime.monitoring_report:main"
+aml-smoke-test = "aml.runtime.smoke_test:main"
+aml-kafka-worker = "aml.runtime.kafka_worker:main"
+aml-spark-stream = "aml.runtime.spark_streaming:main"
 
 [project.optional-dependencies]
 dev = [

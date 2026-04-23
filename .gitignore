@@ -26,9 +26,12 @@ site/
 
 # Python package metadata
 src/aml.egg-info/*
+build/
 
 # Mac
 docs/.DS_Store
 .DS_Store
 logs/*
 artifacts/*
+models/*
+/runtime/

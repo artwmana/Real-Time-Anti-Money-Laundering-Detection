@@ -1,5 +1,10 @@
 # AML System Architecture (Clean Architecture)
 
+> Note: this document describes the target clean architecture for the project.  
+> The current implemented product in this repository is a self-contained local E2E stack built around:
+> FastAPI + inference bundle + SQLite audit store + generator/replay worker + monitoring endpoints.
+> See [RUNBOOK.md](RUNBOOK.md), [API.md](API.md), and [BUILD_E2E_ROADMAP.md](BUILD_E2E_ROADMAP.md) for the current runnable system.
+
 ## 1. Purpose
 
 This document describes the architecture of the **Real-Time Anti-Money-Laundering (AML) Detection System** based on the principles of **Clean Architecture** and **Separation of Concerns**.  

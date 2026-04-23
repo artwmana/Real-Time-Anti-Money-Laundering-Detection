@@ -1,63 +1,191 @@
 # Real-Time AML Detection
 
-This repo trains and serves a model that flags risky money‑laundering transactions.  
-It works with batch files today and is ready to plug into a streaming source later.
+Пет-проект end-to-end ML-системы для обнаружения подозрительных финансовых транзакций в реальном времени.
 
-## What’s inside
-- Feature pipeline that flattens JSON metadata, builds time features, and handles high-cardinality IDs.
-- Two training options:
-  - Scikit-learn (XGBoost/LightGBM/CatBoost) for quick local experiments.
-  - PySpark Gradient Boosted Trees with class weights for very imbalanced data.
-- MkDocs docs with data description and ML system design notes.
+Проект показывает не только обучение модели, но и полный production-like контур: генерацию событий, online scoring API, stateful features, Kafka ingestion, операционное хранение, аналитические логи, мониторинг и replay трафика.
 
-## Quick start (local CPU)
+[English version](README-en.md)
+
+## Идея проекта
+
+Финансовые транзакции поступают как поток событий. Для каждой транзакции система должна быстро:
+
+- собрать признаки из raw payload и исторического состояния клиента;
+- посчитать вероятность AML-risk;
+- принять бизнес-вердикт `CLEAR`, `REVIEW` или `BLOCK`;
+- сохранить результат, audit trail и alerts;
+- отдать ответ через API или обработать событие асинхронно.
+
+Главная цель проекта - показать, как ML-модель превращается в полноценный real-time продукт, а не остается notebook-экспериментом.
+
+## Что демонстрирует проект
+
+- **ML pipeline**: preprocessing, feature engineering, training, inference bundle.
+- **Real-time serving**: FastAPI endpoint `POST /score`.
+- **Streaming architecture**: Kafka worker и Spark Structured Streaming bridge.
+- **Stateful features**: Redis-счетчики по клиентам и мерчантам за 24 часа.
+- **Operational storage**: PostgreSQL как источник операционной правды.
+- **Analytics storage**: ClickHouse для событий, predictions, alerts и dead-letter logs.
+- **Monitoring**: Prometheus-compatible `/metrics`, runtime JSON logs, monitoring summary.
+- **Local fallback**: SQLite-режим для запуска без инфраструктуры.
+- **Reproducibility**: serving через `models/inference_bundle.joblib`.
+
+## Архитектура
+
+```text
+Synthetic generator / Kafka
+          |
+          v
+  Transaction event
+          |
+          v
+  Redis online state ----+
+          |              |
+          v              |
+  Feature pipeline <-----+
+          |
+          v
+  Inference bundle
+          |
+          v
+  Verdict policy
+          |
+          +--> FastAPI response
+          +--> PostgreSQL predictions / alerts
+          +--> ClickHouse analytical logs
+          +--> Kafka predictions / alerts
+          +--> Prometheus metrics
+```
+
+## Основной пользовательский сценарий
+
+1. Сгенерировать или получить транзакцию из Kafka.
+2. Обогатить событие online-счетчиками из Redis.
+3. Прогнать событие через fitted feature pipeline и ensemble model.
+4. Применить policy thresholds и вернуть бизнес-вердикт.
+5. Сохранить prediction, alert и audit context.
+6. Отправить события в мониторинг и аналитические хранилища.
+
+## Возможности API
+
+- `GET /health` - health check.
+- `GET /ready` - проверка готовности bundle и storage backend.
+- `POST /score` - синхронный скоринг транзакции.
+- `GET /events/{event_id}` - получение события с prediction/audit context.
+- `GET /alerts` - список alerts.
+- `POST /alerts/{alert_id}/resolution` - закрытие alert.
+- `GET /metrics` - Prometheus metrics.
+- `GET /monitoring/summary` - агрегированная мониторинговая сводка.
+
+## Измеренная задержка
+
+Локальный замер проводился на 100 последовательных событиях после warm-up. Docker daemon был недоступен, поэтому измерение выполнено в local fallback режиме: `SQLite`, без `Kafka`, `Redis`, `ClickHouse` и `MLflow`.
+
+| Режим | Средняя | p50 | p95 | p99 | max |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Direct in-process scoring | `251.5 ms` | `247.9 ms` | `266.2 ms` | `336.7 ms` | `338.4 ms` |
+| HTTP `POST /score` | `273.1 ms` | `270.3 ms` | `291.6 ms` | `310.4 ms` | `325.8 ms` |
+
+Вывод: локальный end-to-end HTTP scoring path дает примерно `270 ms` p50 и `292 ms` p95. Основная задержка находится в feature/model pipeline и синхронной записи результата, а не в HTTP-слое.
+
+## Как запустить
+
+### Полный infrastructure stack
+
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -e .            # installs core deps
-pip install -e .[dev]       # optional: notebooks/linting
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .
+docker compose up --build -d
 ```
 
-Place your data
-```
-data/raw/AMLNet_August_2025.csv      # or parquet splits in data/processed/
-```
-Target column is `isMoneyLaundering` (1 = suspicious, 0 = normal).
+После запуска доступны:
 
-### Run the sklearn demo
+- API: `http://127.0.0.1:8000`
+- MLflow: `http://127.0.0.1:5000`
+- Kafka: `127.0.0.1:9092`
+- PostgreSQL: `127.0.0.1:5432`
+- ClickHouse HTTP: `127.0.0.1:8123`
+- Redis: `127.0.0.1:6379`
+- Spark master UI: `http://127.0.0.1:8080`
+
+### Smoke test
+
 ```bash
-python main.py
+AML_STORAGE_BACKEND=postgres \
+AML_POSTGRES_DSN=postgresql://aml:aml@localhost:5432/aml \
+AML_CLICKHOUSE_HOST=localhost \
+AML_CLICKHOUSE_PORT=8123 \
+AML_REDIS_URL=redis://localhost:6379/0 \
+AML_KAFKA_BOOTSTRAP_SERVERS=localhost:9092 \
+MLFLOW_TRACKING_URI=http://localhost:5000 \
+python -m aml.runtime.smoke_test
 ```
-It logs pipeline steps to `logs/feature_pipeline.log`.
 
-### Train the PySpark model (handles heavy imbalance)
+### Локальный запуск API без инфраструктуры
+
 ```bash
-python -m aml.pipelines.spark_training
+AML_STORAGE_BACKEND=sqlite \
+AML_ENABLE_CLICKHOUSE=0 \
+AML_ENABLE_KAFKA=0 \
+AML_ENABLE_REDIS=0 \
+AML_ENABLE_MLFLOW=0 \
+python -m uvicorn aml.api.app:app --host 127.0.0.1 --port 8000
 ```
-The script:
-1) Loads splits from `configs/dataset.yaml` (falls back to `data/raw` if parquet splits are absent).
-2) Builds class weights from label counts.
-3) Fits a GBT classifier with `weightCol`.
-4) Saves the model and `metrics.json` to `models/spark_gbt_aml/`.
 
-## Data expectation
-- Schema and feature lists live in `configs/dataset.yaml` and `docs/DATASET.md`.
-- Important columns: amounts/balances, customer/merchant/device IDs, derived time features.
-- Leakage columns (`fraud_probability`, `laundering_typology`, etc.) are dropped before training.
+### Генерация и replay трафика
 
-## How to extend
-- Add new engineered features in `src/aml/pipelines/feature_pipeline.py` under `_feature_engineering`.
-- Tune PySpark GBT hyperparameters in `src/aml/pipelines/spark_training.py`.
-- Swap in another classifier that supports `weightCol` if you prefer (e.g., LogisticRegression).
+```bash
+aml-generate --count 100
+aml-replay --input runtime/generated_events.jsonl --mode api --url http://127.0.0.1:8000/score
+```
 
-## Repo layout
-- `src/aml/features` – flattening, downcasting, target encoding.
-- `src/aml/pipelines` – sklearn pipeline + PySpark trainer.
-- `notebooks/` – EDA and quick experiments.
-- `docs/` – MkDocs site (architecture, dataset, ML system design).
-- `configs/` – dataset paths, schema, feature groups.
+## Обучение модели
 
-## Minimal checklist before using in prod
-- Recompute class weights on your own data.
-- Track experiments in MLflow (hooks are ready to add).
-- Calibrate threshold on precision/recall for your regulator policy.
-- Add monitoring for class drift and prediction drift.
+```bash
+aml-train
+```
+
+Основные training outputs:
+
+- `models/aml_ensemble/`
+- `models/base_models_only/`
+- `models/inference_bundle.joblib`
+
+Serving path использует именно fitted `inference_bundle.joblib`, потому что для корректного runtime scoring нужна не только модель, но и состояние preprocessing/feature pipeline.
+
+## Структура проекта
+
+```text
+src/aml/api              FastAPI application
+src/aml/application      use cases and verdict policy
+src/aml/config           runtime settings
+src/aml/contracts        event and response schemas
+src/aml/generation       synthetic transaction generator
+src/aml/inference        inference service and bundle
+src/aml/infrastructure   Kafka, Redis, ClickHouse, MLflow adapters
+src/aml/models           ensemble model code
+src/aml/monitoring       metrics and JSON logging
+src/aml/pipelines        feature engineering pipeline
+src/aml/runtime          bootstrap, replay, smoke test, workers
+src/aml/storage          PostgreSQL, SQLite and composite repositories
+src/aml/training         training entrypoints
+```
+
+## Что можно улучшить дальше
+
+- вынести repository writes из hot path в async/background writer;
+- добавить batch inference для Kafka/Spark сценариев;
+- профилировать feature pipeline по стадиям и убрать дорогие per-row `pandas` операции;
+- добавить load testing и latency SLO dashboard;
+- сделать model distillation для более быстрого production serving;
+- добавить CI pipeline с smoke test, linting и minimal API contract tests.
+
+## Документация
+
+- [Architecture](docs/ARCHITECTURE.md)
+- [ML System Design](docs/ML_SYSTEM_DESIGN.md)
+- [API](docs/API.md)
+- [Runbook](docs/RUNBOOK.md)
+- [Monitoring](docs/MONITORING.md)
+- [Retraining](docs/RETRAINING.md)
