@@ -1,5 +1,9 @@
 # ML System Design
 
+> Note: this page documents the long-term system design target.  
+> The currently implemented serving product in the repository is a local E2E runtime with:
+> inference bundle serving, FastAPI, SQLite audit storage, synthetic generation, replay, metrics, and monitoring summary.
+
 This page sketches how to run the AML detector as a reliable, low-latency service while keeping training reproducible and traceable.
 
 ## Goals and constraints
@@ -21,7 +25,7 @@ Payment Gateway -> Kafka topic `transactions_raw`
 ### Offline training
 1. **Ingest**: Land CSV/parquet into `data/raw` or `data/processed`.
 2. **Feature build**: `FeaturePipeline` (pandas) creates time signals, ratios, and target encodings for IDs.
-3. **Class imbalance**: PySpark trainer adds inverse-frequency `class_weight` and fits GBT with `weightCol`.
+3. **Class imbalance**: the current ensemble pipeline uses imbalance-aware learners plus threshold tuning for the target class.
 4. **Validation**: PR-AUC and ROC-AUC on a holdout split; pick operating threshold by desired precision/recall.
 5. **Registry**: Save model, metrics.json, and feature schema to an artifact store (e.g., MLflow).
 
@@ -39,6 +43,6 @@ Payment Gateway -> Kafka topic `transactions_raw`
 - **Alert budget**: cap alert rate per merchant/region to prevent investigator overload.
 
 ## Extending the model
-- Try other classifiers with `weightCol` (LogisticRegression, RandomForest) inside `spark_training.py`.
+- Try other classifiers or ensemble members inside `src/aml/models/build_model.py` and wire them through `src/aml/training/optuna_tuning.py`.
 - Add rolling aggregates (e.g., 24h txn count per `nameOrig`) via Spark window functions before the model stage.
 - Export to ONNX/PMML if you need to serve on a non-Spark stack; keep the same feature contract.

@@ -1,25 +1,51 @@
 # Real-Time AML Detection (Overview)
 
-This project builds a real-time anti–money-laundering (AML) detector for transaction streams.  
-It combines a reusable feature pipeline, class-imbalance aware training, and a design ready for streaming ingestion.
+This repository now exposes an infrastructure-backed end-to-end AML product, not only offline ML experiments.
 
-## Core components
-- **Feature pipeline** (pandas + sklearn) — flattens JSON metadata, builds time features, target-encodes high-cardinality IDs.
-- **PySpark trainer** — gradient-boosted trees with `weightCol` to fight the extreme class imbalance in AML labels.
-- **Config-first data contract** — schema, paths, and feature groups live in `configs/dataset.yaml`.
-- **Docs** — architecture, dataset notes, and ML system design for productionizing the model.
+Implemented flow:
+
+`synthetic or Kafka event -> Redis state -> feature engineering -> ensemble scoring -> business verdict -> PostgreSQL -> ClickHouse -> monitoring`
+
+## Product components
+
+- **Training pipeline** — Optuna-tuned AML ensemble and inference bundle generation.
+- **Inference bundle** — fitted preprocessing plus model artifact for serving.
+- **FastAPI scoring service** — sync scoring, alert resolution, audit retrieval, metrics.
+- **Kafka worker** — async processing from `transactions_raw`.
+- **Spark bridge** — Spark Structured Streaming path from Kafka to the scoring API.
+- **Redis feature store** — 24h counters for customer and merchant activity.
+- **Operational store** — PostgreSQL for raw events, feature snapshots, predictions, alerts, DLQ.
+- **Analytical/log sink** — ClickHouse for event, prediction, alert, and dead-letter logs.
+- **MLflow** — training run tracking and artifact logging.
+- **Monitoring** — Prometheus-compatible metrics and persisted monitoring summary.
 
 ## Quick links
-- Architecture: [docs/ARCHITECTURE.md](ARCHITECTURE.md)
-- Dataset: [docs/DATASET.md](DATASET.md)
-- ML system design: [docs/ML_SYSTEM_DESIGN.md](ML_SYSTEM_DESIGN.md)
-- PySpark training script: `src/aml/pipelines/spark_training.py`
 
-## Local try-out
-1. Install: `pip install -e .` (optional: `pip install -e .[dev]`)
-2. Put data under `data/raw/` or parquet splits under `data/processed/`.
-3. Run sklearn demo: `python main.py`
-4. Train with PySpark + class weights: `python -m aml.pipelines.spark_training`
+- Architecture: [ARCHITECTURE.md](ARCHITECTURE.md)
+- Dataset: [DATASET.md](DATASET.md)
+- ML system design: [ML_SYSTEM_DESIGN.md](ML_SYSTEM_DESIGN.md)
+- API: [API.md](API.md)
+- Runbook: [RUNBOOK.md](RUNBOOK.md)
+- Monitoring: [MONITORING.md](MONITORING.md)
+- Retraining: [RETRAINING.md](RETRAINING.md)
+- E2E build roadmap: [BUILD_E2E_ROADMAP.md](BUILD_E2E_ROADMAP.md)
 
-## Why class weighting
-Money-laundering labels are tiny (~0.1%). The PySpark trainer builds inverse-frequency class weights so the model sees positives more often without oversampling. This keeps inference fast and avoids synthetic examples that might leak into production logic.
+## Fast local validation
+
+```bash
+python -m aml.runtime.smoke_test
+```
+
+This command generates events, scores them, writes runtime data to the configured backend, and prints a monitoring summary.
+
+## Main commands
+
+- `aml-train`
+- `aml-serve`
+- `aml-generate --count 100`
+- `aml-generate --count 100 --sink kafka`
+- `aml-replay --count 100 --mode direct`
+- `aml-kafka-worker`
+- `aml-spark-stream`
+- `aml-monitor-report`
+- `python -m aml.runtime.smoke_test`

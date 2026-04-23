@@ -40,6 +40,11 @@ nav:
   - Project:
       - Architecture: ARCHITECTURE.md
       - ML System Design: ML_SYSTEM_DESIGN.md
+      - API: API.md
+      - Runbook: RUNBOOK.md
+      - Monitoring: MONITORING.md
+      - Retraining: RETRAINING.md
+      - E2E Build Roadmap: BUILD_E2E_ROADMAP.md
 
   - Data:
       - Dataset Description: DATASET.md
