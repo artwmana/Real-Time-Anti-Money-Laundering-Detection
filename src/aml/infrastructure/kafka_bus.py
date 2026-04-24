@@ -34,7 +34,13 @@ class KafkaPublisher:
 
         self.producer = KafkaProducer(
             bootstrap_servers=bootstrap_servers,
-            value_serializer=lambda v: json.dumps(v, ensure_ascii=False).encode("utf-8"),
+            value_serializer=lambda v: json.dumps(v, ensure_ascii=False, default=str).encode("utf-8"),
+            acks="all",
+            linger_ms=0,
+            retries=0,
+            api_version=(3, 7),
+            request_timeout_ms=5000,
+            max_block_ms=5000,
         )
         self.raw_topic = raw_topic
         self.predictions_topic = predictions_topic
@@ -42,8 +48,7 @@ class KafkaPublisher:
         self.dead_letter_topic = dead_letter_topic
 
     def _publish(self, topic: str, payload: dict[str, Any]) -> None:
-        self.producer.send(topic, payload)
-        self.producer.flush()
+        self.producer.send(topic, payload).get(timeout=5)
 
     def publish_raw_event(self, payload: dict[str, Any]) -> None:
         self._publish(self.raw_topic, payload)

@@ -129,7 +129,7 @@ def flatten_metadata(df: pd.DataFrame) -> pd.DataFrame:
         ],
     )
 
-    meta_subset = meta_df[["timestamp", "payment_method"]].copy()
+    meta_subset = meta_df.reindex(columns=["timestamp", "payment_method"]).copy()
     meta_subset["timestamp"] = pd.to_datetime(meta_subset["timestamp"], errors="coerce")
     meta_subset["payment_method"] = meta_subset["payment_method"].fillna("Unknown")
 

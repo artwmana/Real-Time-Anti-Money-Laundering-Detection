@@ -43,6 +43,7 @@ class Nested_Time_loo_encoder(BaseEstimator, TransformerMixin):
             self.stats_[col] = enc
             self.rare_categories_[col] = rare
 
+        self._prepare_inference_cache()
         return self
         
 
@@ -88,17 +89,45 @@ class Nested_Time_loo_encoder(BaseEstimator, TransformerMixin):
             raise RuntimeError("Encoder is not fitted")
         
         X = pd.DataFrame(X).copy()
+        self._prepare_inference_cache()
         encoded_parts = []
 
         for col in self.cols:
-            x = X[col].copy()
-            rare = self.rare_categories_.get(col, set())
-            enc = self.stats_[col]
-
-            x = self._apply_rare(x, rare, enc.index)
-            encoded_parts.append(self._map_encodings(x, enc))
+            values = X[col].astype(str).to_numpy()
+            rare = self._rare_cache_.get(col, set())
+            known = self._known_cache_.get(col, set())
+            enc = self._stats_map_cache_[col]
+            default_value = self._default_value_cache_
+            encoded_parts.append(
+                np.fromiter(
+                    (
+                        enc.get("RARE" if value in rare or value not in known else value, default_value)
+                        for value in values
+                    ),
+                    dtype=float,
+                    count=len(values),
+                )
+            )
         
         return np.vstack(encoded_parts).T
+
+    def _prepare_inference_cache(self) -> None:
+        if hasattr(self, "_stats_map_cache_"):
+            return
+
+        self._default_value_cache_ = self._default_value()
+        self._stats_map_cache_ = {
+            col: {str(key): float(value) for key, value in enc.items()}
+            for col, enc in self.stats_.items()
+        }
+        self._known_cache_ = {
+            col: set(values.keys())
+            for col, values in self._stats_map_cache_.items()
+        }
+        self._rare_cache_ = {
+            col: {str(value) for value in self.rare_categories_.get(col, set())}
+            for col in self.cols
+        }
 
     def _apply_rare(self, x: pd.Series, rare_classes: set[str], known_cats: pd.Index) -> pd.Series:
         x = x.astype(str)

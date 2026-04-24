@@ -67,8 +67,11 @@ class InferenceService:
         if self.feature_store is not None:
             stateful_profile = self.feature_store.get_customer_profile(event.nameOrig, event.nameDest)
 
-        feature_frame = self.bundle.pipeline.build_feature_frame(df)
-        encoded = self.bundle.pipeline.transform(df)
+        if hasattr(self.bundle.pipeline, "transform_with_features"):
+            feature_frame, encoded = self.bundle.pipeline.transform_with_features(df)
+        else:
+            feature_frame = self.bundle.pipeline.build_feature_frame(df)
+            encoded = self.bundle.pipeline.transform(df)
         if not isinstance(encoded, pd.DataFrame):
             encoded = pd.DataFrame(encoded, columns=self.bundle.feature_names)
 

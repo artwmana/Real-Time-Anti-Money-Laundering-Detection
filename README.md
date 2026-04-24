@@ -79,14 +79,15 @@ Synthetic generator / Kafka
 
 ## Измеренная задержка
 
-Локальный замер проводился на 100 последовательных событиях после warm-up. Docker daemon был недоступен, поэтому измерение выполнено в local fallback режиме: `SQLite`, без `Kafka`, `Redis`, `ClickHouse` и `MLflow`.
+Замер проводился 2026-04-24 после warm-up на Docker Kafka и Docker ClickHouse. Измеренный synchronous path включает Kafka publish в `transactions_raw`, inference, операционную запись, ClickHouse insert и Kafka publish в `aml_predictions`.
 
-| Режим | Средняя | p50 | p95 | p99 | max |
+| Режим | Средняя | p50 | p95 | min | max |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Direct in-process scoring | `251.5 ms` | `247.9 ms` | `266.2 ms` | `336.7 ms` | `338.4 ms` |
-| HTTP `POST /score` | `273.1 ms` | `270.3 ms` | `291.6 ms` | `310.4 ms` | `325.8 ms` |
+| Docker end-to-end scoring | `21.7 ms` | `22.0 ms` | `25.5 ms` | `18.3 ms` | `25.9 ms` |
+| Inference only | `10.9 ms` | `10.7 ms` | `12.4 ms` | - | - |
+| Model `predict_proba` only | `2.4 ms` | `2.4 ms` | `3.2 ms` | `1.8 ms` | `4.4 ms` |
 
-Вывод: локальный end-to-end HTTP scoring path дает примерно `270 ms` p50 и `292 ms` p95. Основная задержка находится в feature/model pipeline и синхронной записи результата, а не в HTTP-слое.
+Проверка корректности docker path: `30 / 30` measured-событий записались в ClickHouse; Kafka offsets после smoke/warmup/measured составили `transactions_raw:0:36` и `aml_predictions:0:36`.
 
 ## Как запустить
 

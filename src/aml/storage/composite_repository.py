@@ -13,6 +13,8 @@ class CompositeRepository:
         self.primary.save_raw_event(event)
         if self.clickhouse_sink:
             self.clickhouse_sink.log_raw_event(event)
+        if self.kafka_publisher:
+            self.kafka_publisher.publish_raw_event(event.model_dump(mode="json"))
 
     def save_feature_snapshot(self, event_id: str, feature_snapshot: dict[str, Any], encoded_features: dict[str, Any]) -> None:
         self.primary.save_feature_snapshot(event_id, feature_snapshot, encoded_features)

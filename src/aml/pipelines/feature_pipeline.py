@@ -151,7 +151,9 @@ class FeaturePipeline:
     def transform(self, df: pd.DataFrame):
         self._validate_input(df)
         feats = self._build_features(df)
+        return self._transform_features(feats)
 
+    def _transform_features(self, feats: pd.DataFrame):
         if not self.enable_encoding:
             return feats.to_numpy()
 
@@ -166,6 +168,11 @@ class FeaturePipeline:
             return self._adding_col(Xt)
 
         return Xt
+
+    def transform_with_features(self, df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame | np.ndarray]:
+        self._validate_input(df)
+        feats = self._build_features(df)
+        return feats, self._transform_features(feats)
 
     def transform_single(self, record: Dict[str, Any]):
         return self.transform(pd.DataFrame([record]))
@@ -215,7 +222,7 @@ class FeaturePipeline:
 
         df = self._ensure_time_columns(df)
 
-        if self.enable_downcasting:
+        if self.enable_downcasting and len(df) > 1:
             df = optimize_dataframe(df)
 
         df = self._feature_engineering(df)

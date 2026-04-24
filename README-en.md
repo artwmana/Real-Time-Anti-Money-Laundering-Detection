@@ -79,14 +79,15 @@ Synthetic generator / Kafka
 
 ## Measured Latency
 
-The local benchmark used 100 sequential events after warm-up. Docker daemon was unavailable, so the benchmark was executed in local fallback mode: `SQLite`, without `Kafka`, `Redis`, `ClickHouse`, or `MLflow`.
+The benchmark was run on 2026-04-24 after warm-up with Docker Kafka and Docker ClickHouse. The measured synchronous path includes Kafka publish to `transactions_raw`, inference, operational persistence, ClickHouse insert, and Kafka publish to `aml_predictions`.
 
-| Mode | Mean | p50 | p95 | p99 | max |
+| Mode | Mean | p50 | p95 | min | max |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Direct in-process scoring | `251.5 ms` | `247.9 ms` | `266.2 ms` | `336.7 ms` | `338.4 ms` |
-| HTTP `POST /score` | `273.1 ms` | `270.3 ms` | `291.6 ms` | `310.4 ms` | `325.8 ms` |
+| Docker end-to-end scoring | `21.7 ms` | `22.0 ms` | `25.5 ms` | `18.3 ms` | `25.9 ms` |
+| Inference only | `10.9 ms` | `10.7 ms` | `12.4 ms` | - | - |
+| Model `predict_proba` only | `2.4 ms` | `2.4 ms` | `3.2 ms` | `1.8 ms` | `4.4 ms` |
 
-Takeaway: local end-to-end HTTP scoring is around `270 ms` p50 and `292 ms` p95. Most latency comes from the feature/model pipeline and synchronous result persistence, not from the HTTP layer.
+Docker path correctness check: `30 / 30` measured events were written to ClickHouse; Kafka offsets after smoke/warmup/measured were `transactions_raw:0:36` and `aml_predictions:0:36`.
 
 ## How To Run
 
