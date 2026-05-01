@@ -1,60 +1,121 @@
 # Real-Time AML Detection
 
-A pet project of an end-to-end ML system for real-time detection of suspicious financial transactions — covering model training, event generation, online scoring API, stateful features, Kafka ingestion, operational storage, analytical logging, monitoring, and traffic replay.
+Pet project that demonstrates an end-to-end ML system for detecting suspicious financial transactions in real time.
 
-[Russian version](README.md)
+The project is not limited to model training. It shows a production-like product loop: event generation, online scoring API, stateful features, Kafka ingestion, operational storage, analytical logs, monitoring, and traffic replay.
 
-## Problem
+[Русская версия](README.md)
 
-Financial transactions arrive as a stream of events. For each transaction, the system must quickly:
+## Project Idea
 
-* extract features from the raw payload and the client’s historical state;
-* compute the AML risk probability;
-* make a business decision: `CLEAR`, `BLOCK`, or `REVIEW`;
-* persist the result, audit trail, and alerts;
-* return a response via API or process the event asynchronously.
+Financial transactions arrive as a stream of events. For every transaction, the system should quickly:
 
-## What This Project Demonstrates
+- build features from the raw payload and customer history;
+- estimate AML-risk probability;
+- return a business verdict: `CLEAR`, `REVIEW`, or `BLOCK`;
+- persist prediction, audit trail, and alerts;
+- respond through an API or process the event asynchronously.
 
-* **ML pipeline**: preprocessing, feature engineering, training, inference bundle.
-* **Real-time serving**: FastAPI endpoint `POST /score`.
-* **Streaming architecture**: Kafka worker and Spark Structured Streaming bridge.
-* **Stateful features**: Redis counters for customers and merchants over a 24-hour window.
-* **Operational storage**: PostgreSQL as the system of operational truth.
-* **Analytics storage**: ClickHouse for events, predictions, alerts, and dead-letter logs.
-* **Monitoring**: Prometheus-compatible `/metrics`, runtime JSON logs, monitoring summary.
-* **Local fallback**: SQLite mode for running without infrastructure.
-* **Reproducibility**: serving via `models/inference_bundle.joblib`.
+The main goal is to show how an ML model becomes a real-time product, not just a notebook experiment.
 
-## Main Flow
+## What The Project Demonstrates
 
-1. Generate or receive a transaction from Kafka.
+- **ML pipeline**: preprocessing, feature engineering, training, inference bundle.
+- **Real-time serving**: FastAPI endpoint `POST /score`.
+- **Streaming architecture**: Kafka worker and Spark Structured Streaming bridge.
+- **Stateful features**: Redis 24-hour counters for customers and merchants.
+- **Operational storage**: PostgreSQL as the operational source of truth.
+- **Analytics storage**: ClickHouse for events, predictions, alerts, and dead-letter logs.
+- **Monitoring**: Prometheus-compatible `/metrics`, runtime JSON logs, monitoring summary.
+- **Local fallback**: SQLite mode for running without the full infrastructure stack.
+- **Reproducibility**: serving through `models/inference_bundle.joblib`.
+
+## Architecture
+
+```text
+Synthetic generator / Kafka
+          |
+          v
+  Transaction event
+          |
+          v
+  Redis online state ----+
+          |              |
+          v              |
+  Feature pipeline <-----+
+          |
+          v
+  Inference bundle
+          |
+          v
+  Verdict policy
+          |
+          +--> FastAPI response
+          +--> PostgreSQL predictions / alerts
+          +--> ClickHouse analytical logs
+          +--> Kafka predictions / alerts
+          +--> Prometheus metrics
+```
+
+## Main User Flow
+
+1. Generate a transaction or consume it from Kafka.
 2. Enrich the event with online counters from Redis.
-3. Pass the event through the fitted feature pipeline and ensemble model.
-4. Apply policy thresholds and produce a business verdict.
+3. Run the event through the fitted feature pipeline and ensemble model.
+4. Apply policy thresholds and return a business verdict.
 5. Persist prediction, alert, and audit context.
-6. Send events to monitoring and analytical storage.
+6. Publish events to monitoring and analytical stores.
 
-## API
+## API Capabilities
 
-* `GET /health` — health check
-* `GET /ready` — readiness check for bundle and storage backend
-* `POST /score` — synchronous transaction scoring
-* `GET /events/{event_id}` — retrieve event with prediction/audit context
-* `GET /alerts` — list alerts
-* `POST /alerts/{alert_id}/resolution` — resolve an alert
-* `GET /metrics` — Prometheus metrics
-* `GET /monitoring/summary` — aggregated monitoring summary
+- `GET /health` - health check.
+- `GET /ready` - inference bundle and storage backend readiness.
+- `POST /score` - synchronous transaction scoring.
+- `GET /events/{event_id}` - event details with prediction and audit context.
+- `GET /alerts` - alert list.
+- `POST /alerts/{alert_id}/resolution` - alert resolution.
+- `GET /metrics` - Prometheus metrics.
+- `GET /monitoring/summary` - aggregated monitoring summary.
 
-## Latency
+## Measured Latency
 
-| Mode                       |   Average |       p50 |       p95 |       min |       max |
-| -------------------------- | --------: | --------: | --------: | --------: | --------: |
-| Docker end-to-end scoring  | `21.7 ms` | `22.0 ms` | `25.5 ms` | `18.3 ms` | `25.9 ms` |
-| Inference only             | `10.9 ms` | `10.7 ms` | `12.4 ms` |         - |         - |
-| Model `predict_proba` only |  `2.4 ms` |  `2.4 ms` |  `3.2 ms` |  `1.8 ms` |  `4.4 ms` |
+`100` sequential events:
 
-## Run
+| Mode | Mean | p50 | p95 | p99 | min | max |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Direct in-process scoring | `11.80 ms` | `11.43 ms` | `12.41 ms` | `19.22 ms` | `10.89 ms` | `32.77 ms` |
+| HTTP `POST /score` | `14.55 ms` | `13.46 ms` | `20.04 ms` | `30.57 ms` | `11.64 ms` | `50.35 ms` |
+
+Takeaway: the local synchronous scoring path is about `13.5 ms` p50 and `20.0 ms` p95 at the HTTP layer. The additional HTTP overhead versus a direct in-process call is roughly `2.8 ms` on average.
+
+## Model Quality
+
+Split sizes:
+
+- train: `959,903` rows, `1,544` positives (`0.161%`)
+- val: `83,918` rows, `108` positives (`0.129%`)
+- test: `30,956` rows, `75` positives (`0.242%`)
+
+Test split metrics:
+
+| Metric | Value |
+| --- | ---: |
+| ROC-AUC | `0.9844` |
+| PR-AUC | `0.9109` |
+| F1 @ review threshold | `0.8408` |
+| Precision @ review threshold | `0.8049` |
+| Recall @ review threshold | `0.8800` |
+| Review threshold | `0.65` |
+| Block threshold | `0.90` |
+
+Confusion matrix at `review threshold = 0.65`:
+
+```text
+TN=30865  FP=16
+FN=9      TP=66
+```
+
+## How To Run
 
 ### Full Infrastructure Stack
 
@@ -65,15 +126,17 @@ pip install -e .
 docker compose up --build -d
 ```
 
-* API: `http://127.0.0.1:8000`
-* MLflow: `http://127.0.0.1:5000`
-* Kafka: `127.0.0.1:9092`
-* PostgreSQL: `127.0.0.1:5432`
-* ClickHouse HTTP: `127.0.0.1:8123`
-* Redis: `127.0.0.1:6379`
-* Spark master UI: `http://127.0.0.1:8080`
+Available services:
 
-### Tests
+- API: `http://127.0.0.1:8000`
+- MLflow: `http://127.0.0.1:5000`
+- Kafka: `127.0.0.1:9092`
+- PostgreSQL: `127.0.0.1:5432`
+- ClickHouse HTTP: `127.0.0.1:8123`
+- Redis: `127.0.0.1:6379`
+- Spark master UI: `http://127.0.0.1:8080`
+
+### Smoke Test
 
 ```bash
 AML_STORAGE_BACKEND=postgres \
@@ -86,7 +149,7 @@ MLFLOW_TRACKING_URI=http://localhost:5000 \
 python -m aml.runtime.smoke_test
 ```
 
-### Local API Run
+### Local API Without Infrastructure
 
 ```bash
 AML_STORAGE_BACKEND=sqlite \
@@ -97,7 +160,7 @@ AML_ENABLE_MLFLOW=0 \
 python -m uvicorn aml.api.app:app --host 127.0.0.1 --port 8000
 ```
 
-### Traffic Generation and Replay
+### Generate And Replay Traffic
 
 ```bash
 aml-generate --count 100
@@ -112,11 +175,11 @@ aml-train
 
 Main training outputs:
 
-* `models/aml_ensemble/`
-* `models/base_models_only/`
-* `models/inference_bundle.joblib`
+- `models/aml_ensemble/`
+- `models/base_models_only/`
+- `models/inference_bundle.joblib`
 
-The serving path uses the fitted `inference_bundle.joblib`, since correct runtime scoring requires not only the model but also the preprocessing and feature pipeline state.
+The serving path uses the fitted `inference_bundle.joblib`, because runtime scoring requires both the model and the preprocessing/feature pipeline state.
 
 ## Project Structure
 
@@ -136,11 +199,20 @@ src/aml/storage          PostgreSQL, SQLite and composite repositories
 src/aml/training         training entrypoints
 ```
 
+## Next Improvements
+
+- move repository writes out of the hot path into an async/background writer;
+- add batch inference for Kafka/Spark scenarios;
+- profile the feature pipeline by stage and remove expensive per-row `pandas` operations;
+- add load testing and a latency SLO dashboard;
+- use model distillation for faster production serving;
+- add a CI pipeline with smoke test, linting, and minimal API contract tests.
+
 ## Documentation
 
-* [Architecture](docs/ARCHITECTURE.md)
-* [ML System Design](docs/ML_SYSTEM_DESIGN.md)
-* [API](docs/API.md)
-* [Runbook](docs/RUNBOOK.md)
-* [Monitoring](docs/MONITORING.md)
-* [Retraining](docs/RETRAINING.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [ML System Design](docs/ML_SYSTEM_DESIGN.md)
+- [API](docs/API.md)
+- [Runbook](docs/RUNBOOK.md)
+- [Monitoring](docs/MONITORING.md)
+- [Retraining](docs/RETRAINING.md)
