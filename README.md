@@ -1,18 +1,22 @@
 # Real-Time AML Detection
 
-Пет-проект end-to-end ML-системы для обнаружения подозрительных финансовых транзакций в реальном времени от обучения модели, генерацию событий, online scoring API, stateful features, Kafka ingestion, операционное хранение, аналитические логи, мониторинг и replay трафика.
+Пет-проект end-to-end ML-системы для обнаружения подозрительных финансовых транзакций в реальном времени.
+
+Проект показывает не только обучение модели, но и полный production-like контур: генерацию событий, online scoring API, stateful features, Kafka ingestion, операционное хранение, аналитические логи, мониторинг и replay трафика.
 
 [English version](README-en.md)
 
-## Задача
+## Идея проекта
 
 Финансовые транзакции поступают как поток событий. Для каждой транзакции система должна быстро:
 
 - собрать признаки из raw payload и исторического состояния клиента;
 - посчитать вероятность AML-risk;
-- принять бизнес-вердикт `CLEAR`, `BLOCK` или `REVIEW`;
+- принять бизнес-вердикт `CLEAR`, `REVIEW` или `BLOCK`;
 - сохранить результат, audit trail и alerts;
 - отдать ответ через API или обработать событие асинхронно.
+
+Главная цель проекта - показать, как ML-модель превращается в полноценный real-time продукт, а не остается notebook-экспериментом.
 
 ## Что демонстрирует проект
 
@@ -26,7 +30,34 @@
 - **Local fallback**: SQLite-режим для запуска без инфраструктуры.
 - **Reproducibility**: serving через `models/inference_bundle.joblib`.
 
-## Основной сценарий
+## Архитектура
+
+```text
+Synthetic generator / Kafka
+          |
+          v
+  Transaction event
+          |
+          v
+  Redis online state ----+
+          |              |
+          v              |
+  Feature pipeline <-----+
+          |
+          v
+  Inference bundle
+          |
+          v
+  Verdict policy
+          |
+          +--> FastAPI response
+          +--> PostgreSQL predictions / alerts
+          +--> ClickHouse analytical logs
+          +--> Kafka predictions / alerts
+          +--> Prometheus metrics
+```
+
+## Основной пользовательский сценарий
 
 1. Сгенерировать или получить транзакцию из Kafka.
 2. Обогатить событие online-счетчиками из Redis.
@@ -35,7 +66,7 @@
 5. Сохранить prediction, alert и audit context.
 6. Отправить события в мониторинг и аналитические хранилища.
 
-## API
+## Возможности API
 
 - `GET /health` - health check.
 - `GET /ready` - проверка готовности bundle и storage backend.
@@ -48,13 +79,39 @@
 
 ## Задержка
 
-| Режим | Средняя | p50 | p95 | min | max |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Docker end-to-end scoring | `21.7 ms` | `22.0 ms` | `25.5 ms` | `18.3 ms` | `25.9 ms` |
-| Inference only | `10.9 ms` | `10.7 ms` | `12.4 ms` | - | - |
-| Model `predict_proba` only | `2.4 ms` | `2.4 ms` | `3.2 ms` | `1.8 ms` | `4.4 ms` |
+ `100` последовательных событий:
+| Режим | Средняя | p50 | p95 | p99 | min | max |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Direct in-process scoring | `11.80 ms` | `11.43 ms` | `12.41 ms` | `19.22 ms` | `10.89 ms` | `32.77 ms` |
+| HTTP `POST /score` | `14.55 ms` | `13.46 ms` | `20.04 ms` | `30.57 ms` | `11.64 ms` | `50.35 ms` |
 
-## Запустить
+## Качество модели
+Размеры выборок:
+
+- train: `959,903` строк, `1,544` positives (`0.161%`)
+- val: `83,918` строк, `108` positives (`0.129%`)
+- test: `30,956` строк, `75` positives (`0.242%`)
+
+Метрики на test split:
+
+| Метрика | Значение |
+| --- | ---: |
+| ROC-AUC | `0.9844` |
+| PR-AUC | `0.9109` |
+| F1 @ review threshold | `0.8408` |
+| Precision @ review threshold | `0.8049` |
+| Recall @ review threshold | `0.8800` |
+| Review threshold | `0.65` |
+| Block threshold | `0.90` |
+
+Confusion matrix при `review threshold = 0.65`:
+
+```text
+TN=30865  FP=16
+FN=9      TP=66
+```
+
+## Как запустить
 
 ### Полный infrastructure stack
 
@@ -65,6 +122,8 @@ pip install -e .
 docker compose up --build -d
 ```
 
+После запуска доступны:
+
 - API: `http://127.0.0.1:8000`
 - MLflow: `http://127.0.0.1:5000`
 - Kafka: `127.0.0.1:9092`
@@ -73,7 +132,7 @@ docker compose up --build -d
 - Redis: `127.0.0.1:6379`
 - Spark master UI: `http://127.0.0.1:8080`
 
-### Тесты
+### Smoke test
 
 ```bash
 AML_STORAGE_BACKEND=postgres \
@@ -86,7 +145,7 @@ MLFLOW_TRACKING_URI=http://localhost:5000 \
 python -m aml.runtime.smoke_test
 ```
 
-### Локальный запуск API
+### Локальный запуск API без инфраструктуры
 
 ```bash
 AML_STORAGE_BACKEND=sqlite \
@@ -135,6 +194,15 @@ src/aml/runtime          bootstrap, replay, smoke test, workers
 src/aml/storage          PostgreSQL, SQLite and composite repositories
 src/aml/training         training entrypoints
 ```
+
+## Что можно улучшить дальше
+
+- вынести repository writes из hot path в async/background writer;
+- добавить batch inference для Kafka/Spark сценариев;
+- профилировать feature pipeline по стадиям и убрать дорогие per-row `pandas` операции;
+- добавить load testing и latency SLO dashboard;
+- сделать model distillation для более быстрого production serving;
+- добавить CI pipeline с smoke test, linting и minimal API contract tests.
 
 ## Документация
 
